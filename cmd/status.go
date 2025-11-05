@@ -10,12 +10,7 @@ import (
 "github.com/spf13/cobra"
 )
 
-type CourseProgress struct {
-Name        string `json:"name"`
-CurrentStep int    `json:"current_step"`
-TotalSteps  int    `json:"total_steps"`
-Completed   bool   `json:"completed"`
-}
+// CourseProgress is now defined in course_utils.go as CourseInfo
 
 var statusCmd = &cobra.Command{
 Use:   "status",
@@ -46,7 +41,7 @@ return
 fmt.Printf("📂 Repository: %s\n", repoInfo)
 
 // Detect courses and progress
-courses := detectCourses()
+courses := DetectAvailableCourses()
 if len(courses) == 0 {
 fmt.Println("❌ No PowerShell Skills courses detected in this repository.")
 return
@@ -58,16 +53,9 @@ displayCourseProgress(course)
 }
 
 // Overall progress
-completed := 0
-total := len(courses)
-for _, course := range courses {
-if course.Completed {
-completed++
-}
-}
-
+completed, total, percentage := GetCourseProgressSummary()
 fmt.Printf("\n🏆 Overall Progress: %d/%d courses completed (%.1f%%)\n", 
-completed, total, float64(completed)/float64(total)*100)
+completed, total, percentage)
 }
 
 func isGitRepo() bool {
@@ -93,70 +81,9 @@ return "", err
 return repo.NameWithOwner, nil
 }
 
-func detectCourses() []CourseProgress {
-var courses []CourseProgress
+// Course utility functions moved to course_utils.go
 
-// Course 1 (root directory)
-if hasWorkflowFiles(".") {
-courses = append(courses, CourseProgress{
-Name:        "Course 1: PowerShell Fundamentals",
-CurrentStep: getCurrentStep("."),
-TotalSteps:  5,
-Completed:   isCompleted("."),
-})
-}
-
-// Course 2
-if hasWorkflowFiles("course-2-pipelines-filtering") {
-courses = append(courses, CourseProgress{
-Name:        "Course 2: Pipelines & Filtering",
-CurrentStep: getCurrentStep("course-2-pipelines-filtering"),
-TotalSteps:  5,
-Completed:   isCompleted("course-2-pipelines-filtering"),
-})
-}
-
-// Course 3
-if hasWorkflowFiles("course-3-functions-modules") {
-courses = append(courses, CourseProgress{
-Name:        "Course 3: Functions & Modules",
-CurrentStep: getCurrentStep("course-3-functions-modules"),
-TotalSteps:  5,
-Completed:   isCompleted("course-3-functions-modules"),
-})
-}
-
-// Course 4
-if hasWorkflowFiles("course-4-automation-devops") {
-courses = append(courses, CourseProgress{
-Name:        "Course 4: Automation & DevOps",
-CurrentStep: getCurrentStep("course-4-automation-devops"),
-TotalSteps:  5,
-Completed:   isCompleted("course-4-automation-devops"),
-})
-}
-
-return courses
-}
-
-func hasWorkflowFiles(dir string) bool {
-workflowDir := filepath.Join(dir, ".github", "workflows")
-_, err := os.Stat(workflowDir)
-return err == nil
-}
-
-func getCurrentStep(dir string) int {
-// This is a simplified implementation
-// In a real scenario, you''d parse git history or workflow status
-return 1
-}
-
-func isCompleted(dir string) bool {
-// Simplified - would check git history for completion
-return false
-}
-
-func displayCourseProgress(course CourseProgress) {
+func displayCourseProgress(course CourseInfo) {
 status := "🔄"
 if course.Completed {
 status = "✅"

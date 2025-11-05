@@ -134,22 +134,27 @@ fmt.Println("\n🚀 Ready to continue? Use ''gh pwsh-skills validate'' to test y
 }
 
 func detectCurrentCourse() string {
-// Simple course detection based on directory structure
-if hasWorkflowFiles("course-4-automation-devops") {
-return "automation"
-}
-if hasWorkflowFiles("course-3-functions-modules") {
-return "functions"
-}
-if hasWorkflowFiles("course-2-pipelines-filtering") {
-return "pipelines"
-}
-if hasWorkflowFiles(".") {
-return "fundamentals"
-}
-return ""
+	// Use the shared course detection logic
+	currentCourse := DetectCurrentCourseInfo()
+	if currentCourse == nil {
+		return ""
+	}
+	
+	// Map course names to hint categories
+	switch currentCourse.Index {
+	case 0:
+		return "fundamentals"
+	case 1:
+		return "pipelines"
+	case 2:
+		return "functions"
+	case 3:
+		return "automation"
+	default:
+		return ""
+	}
 }
 
 func init() {
-rootCmd.AddCommand(hintCmd)
+	rootCmd.AddCommand(hintCmd)
 }
