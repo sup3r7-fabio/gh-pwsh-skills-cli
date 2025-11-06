@@ -3,8 +3,6 @@ package cmd
 import (
 "encoding/json"
 "fmt"
-"os"
-"path/filepath"
 
 "github.com/cli/go-gh"
 "github.com/spf13/cobra"
@@ -56,11 +54,6 @@ displayCourseProgress(course)
 completed, total, percentage := GetCourseProgressSummary()
 fmt.Printf("\n🏆 Overall Progress: %d/%d courses completed (%.1f%%)\n", 
 completed, total, percentage)
-}
-
-func isGitRepo() bool {
-_, err := os.Stat(".git")
-return err == nil
 }
 
 func getRepoInfo() (string, error) {

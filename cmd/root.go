@@ -1,8 +1,16 @@
 package cmd
 
 import (
-"fmt"
-"github.com/spf13/cobra"
+	"fmt"
+	"github.com/spf13/cobra"
+)
+
+// Version information
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+	builtBy = "unknown"
 )
 
 var rootCmd = &cobra.Command{
@@ -32,6 +40,22 @@ fmt.Println("💡 Start with 'gh pwsh-skills status' to see your current progres
 },
 }
 
+// SetVersionInfo sets the version information from main
+func SetVersionInfo(v, c, d, b string) {
+	version = v
+	commit = c
+	date = d
+	builtBy = b
+	rootCmd.Version = version
+	// Update the version template with actual values
+	rootCmd.SetVersionTemplate(fmt.Sprintf("PowerShell GitHub Skills CLI Extension %s\nBuilt: %s\nCommit: %s\nBuilt by: %s\n", version, date, commit, builtBy))
+}
+
 func Execute() error {
-return rootCmd.Execute()
+	return rootCmd.Execute()
+}
+
+func init() {
+	// Initial version template - will be updated when SetVersionInfo is called
+	rootCmd.SetVersionTemplate("PowerShell GitHub Skills CLI Extension {{.Version}}\n")
 }
