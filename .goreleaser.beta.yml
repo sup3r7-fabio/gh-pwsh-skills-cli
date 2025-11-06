@@ -1,0 +1,159 @@
+# .goreleaser.beta.yml - Configuration for beta releases
+version: 2
+
+project_name: gh-pwsh-skills
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: gh-pwsh-skills-beta
+    binary: gh-pwsh-skills
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+      - -X main.builtBy=sup3r7-fabio
+      - -X main.channel=beta
+
+archives:
+  - id: beta
+    builds:
+      - gh-pwsh-skills-beta
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}_beta
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+
+checksum:
+  name_template: 'checksums_beta.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-beta-SNAPSHOT-{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - '^style:'
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: 🚀 New Features (Beta)
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: 🐛 Bug Fixes (Beta)
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: 🔧 Improvements (Beta)
+      regexp: '^.*?improve(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: 📚 Documentation (Beta)
+      regexp: '^.*?docs?(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: 🔧 Other Changes (Beta)
+      order: 999
+
+release:
+  github:
+    owner: sup3r7-fabio
+    name: gh-pwsh-skills
+  name_template: "{{ .Version }} (Beta)"
+  draft: false
+  prerelease: true
+  mode: replace
+  header: |
+    ## 🧪 PowerShell GitHub Skills CLI Extension {{ .Tag }} - BETA RELEASE
+    
+    ⚠️ **This is a BETA release** - Use with caution in production environments!
+    
+    🚀 Interactive PowerShell GitHub Skills course assistant (Beta Channel)
+    
+    ### Beta Installation
+    ```bash
+    # Install this specific beta version
+    gh extension install sup3r7-fabio/gh-pwsh-skills@{{ .Tag }}
+    
+    # Or install latest and upgrade to beta
+    gh extension install sup3r7-fabio/gh-pwsh-skills
+    gh extension upgrade gh-pwsh-skills
+    ```
+    
+    ### 🧪 What's New in Beta
+  footer: |
+    ### ⚠️ Beta Release Notice
+    
+    This is a **BETA** release intended for testing and feedback. Please:
+    - 🧪 Test thoroughly before using in production
+    - 🐛 Report any issues at: https://github.com/sup3r7-fabio/gh-pwsh-skills/issues
+    - 💬 Provide feedback on new features
+    - 📝 Check the documentation for breaking changes
+    
+    ### 🔍 Checksums
+    
+    Verify file integrity with:
+    ```bash
+    sha256sum -c checksums_beta.txt
+    ```
+    
+    ### 🔗 Links
+    
+    - **Stable Release**: https://github.com/sup3r7-fabio/gh-pwsh-skills/releases/latest
+    - **Full Beta Changelog**: https://github.com/sup3r7-fabio/gh-pwsh-skills/compare/{{ .PreviousTag }}...{{ .Tag }}
+    - **Issues & Feedback**: https://github.com/sup3r7-fabio/gh-pwsh-skills/issues
+
+# GitHub CLI extension specific settings for beta
+github_urls:
+  api: https://api.github.com/
+  upload: https://uploads.github.com/
+  download: https://github.com/
+
+# Disable Homebrew for beta releases
+brews: []
+
+# Disable Docker for beta releases  
+dockers: []
+
+# Custom publishers for beta GitHub CLI extensions
+publishers:
+  - name: github-cli-extension-beta
+    ids:
+      - beta
+    cmd: |
+      echo "🧪 GitHub CLI Extension BETA published successfully!"
+      echo ""
+      echo "📦 Install Beta: gh extension install sup3r7-fabio/gh-pwsh-skills@{{ .Tag }}"
+      echo "🔄 Upgrade: gh extension upgrade gh-pwsh-skills"
+      echo "⚠️  This is a BETA release - use with caution!"
