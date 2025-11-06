@@ -100,11 +100,10 @@ fmt.Printf("❌ No hints available for course type: %s\n", courseType)
 return
 }
 
-// Select a random hint from the appropriate course
-rand.Seed(time.Now().UnixNano())
-hint := hints[rand.Intn(len(hints))]
-
-fmt.Printf("🎯 Topic: %s\n\n", hint.Title)
+	// Select a random hint from the appropriate course
+	// Use modern random number generation (Go 1.20+)
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	hint := hints[r.Intn(len(hints))]fmt.Printf("🎯 Topic: %s\n\n", hint.Title)
 fmt.Printf("📝 Explanation:\n%s\n\n", hint.Description)
 fmt.Printf("💻 Example:\n%s\n\n", hint.Example)
 fmt.Printf("📚 Learn More: %s\n\n", hint.Reference)
