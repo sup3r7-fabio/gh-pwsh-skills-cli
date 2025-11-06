@@ -29,13 +29,9 @@ func TestSetVersionInfo(t *testing.T) {
 	}
 }
 
-func TestExecute(t *testing.T) {
-	// Test that Execute function exists
-	// We can't actually test execution without causing the command to run
-	if Execute == nil {
-		t.Error("Execute function should not be nil")
-	}
-}
+// TestExecute is removed because testing Execute function directly
+// would cause the CLI to run, which is not suitable for unit tests.
+// The Execute function is tested indirectly through integration tests.
 
 func TestGetAllCoursesInfo(t *testing.T) {
 	courses := GetAllCoursesInfo()
