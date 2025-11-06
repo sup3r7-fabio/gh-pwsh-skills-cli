@@ -1,0 +1,391 @@
+name: Beta Release
+
+on:
+  # Only manual dispatch - no automatic triggers on push
+  # Use semver tag-based workflows for automatic releases
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'beta'
+        type: choice
+        options:
+          - 'beta'
+          - 'release-candidate'
+          - 'stable'
+          - 'hotfix'
+      version_increment:
+        description: 'Version increment (auto will auto-detect from commits)'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - 'auto'
+          - 'major'
+          - 'minor'
+          - 'patch'
+      custom_version:
+        description: 'Custom version (overrides increment, e.g., 1.2.3)'
+        required: false
+        type: string
+      beta_version:
+        description: 'Beta version suffix (e.g., beta.1, rc.1) - only for beta/rc releases'
+        required: false
+        default: 'beta'
+        type: string
+      create_prerelease:
+        description: 'Create as GitHub prerelease'
+        required: false
+        default: true
+        type: boolean
+      skip_tests:
+        description: 'Skip running tests (not recommended)'
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: 'Dry run - build but do not publish'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  GO_VERSION: '1.25.3'
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip_tests || github.event_name == 'push' }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+      
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+          
+    - name: Download dependencies
+      run: go mod download
+      
+    - name: Run tests
+      run: go test -v ./...
+      
+    - name: Build
+      run: go build -v ./...
+
+  beta-release:
+    name: Release
+    needs: test
+    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Generate release version
+      id: version
+      run: |
+        set -euo pipefail
+        
+        # Get inputs with defaults
+        RELEASE_TYPE="${{ inputs.release_type || 'beta' }}"
+        VERSION_INCREMENT="${{ inputs.version_increment || 'auto' }}"
+        CUSTOM_VERSION="${{ inputs.custom_version }}"
+        BETA_SUFFIX="${{ inputs.beta_version || 'beta' }}"
+        CREATE_PRERELEASE="${{ inputs.create_prerelease || 'true' }}"
+        DRY_RUN="${{ inputs.dry_run || 'false' }}"
+        
+        echo "Release configuration:"
+        echo "  Type: $RELEASE_TYPE"
+        echo "  Increment: $VERSION_INCREMENT"
+        echo "  Custom Version: ${CUSTOM_VERSION:-'(none)'}"
+        echo "  Beta Suffix: $BETA_SUFFIX"
+        echo "  Prerelease: $CREATE_PRERELEASE"
+        echo "  Dry Run: $DRY_RUN"
+        
+        # Get the latest tag or use v0.0.0 if no tags exist
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        echo "Latest tag: $LATEST_TAG"
+        
+        # Remove 'v' prefix and parse version components
+        CURRENT_VERSION=${LATEST_TAG#v}
+        IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+        MAJOR=${VERSION_PARTS[0]:-0}
+        MINOR=${VERSION_PARTS[1]:-0}
+        PATCH=${VERSION_PARTS[2]:-0}
+        
+        # Remove any pre-release suffix from patch version
+        PATCH=$(echo "$PATCH" | sed 's/-.*$//')
+        
+        echo "Current version: $MAJOR.$MINOR.$PATCH"
+        
+        # Determine new version
+        if [ -n "$CUSTOM_VERSION" ]; then
+          NEW_VERSION="$CUSTOM_VERSION"
+          echo "Using custom version: $NEW_VERSION"
+        else
+          # Auto-detect version increment based on commit messages if increment is 'auto'
+          if [ "$VERSION_INCREMENT" = "auto" ]; then
+            # Check commit messages since last tag for conventional commits
+            if git log "$LATEST_TAG..HEAD" --oneline | grep -q "BREAKING CHANGE\|feat!:\|fix!:"; then
+              VERSION_INCREMENT="major"
+            elif git log "$LATEST_TAG..HEAD" --oneline | grep -q "feat:"; then
+              VERSION_INCREMENT="minor"
+            else
+              VERSION_INCREMENT="patch"
+            fi
+            echo "Auto-detected increment: $VERSION_INCREMENT"
+          fi
+          
+          # Calculate new version
+          case "$VERSION_INCREMENT" in
+            major)
+              NEW_MAJOR=$((MAJOR + 1))
+              NEW_VERSION="$NEW_MAJOR.0.0"
+              ;;
+            minor)
+              NEW_MINOR=$((MINOR + 1))
+              NEW_VERSION="$MAJOR.$NEW_MINOR.0"
+              ;;
+            patch)
+              NEW_PATCH=$((PATCH + 1))
+              NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
+              ;;
+            *)
+              echo "Invalid version increment: $VERSION_INCREMENT"
+              exit 1
+              ;;
+          esac
+        fi
+        
+        # Add suffix based on release type
+        case "$RELEASE_TYPE" in
+          beta)
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            COMMIT_SHORT=$(git rev-parse --short HEAD)
+            if [ "$BETA_SUFFIX" = "beta" ]; then
+              FINAL_VERSION="$NEW_VERSION-beta.${TIMESTAMP}.${COMMIT_SHORT}"
+            else
+              FINAL_VERSION="$NEW_VERSION-${BETA_SUFFIX}"
+            fi
+            IS_PRERELEASE="true"
+            CONFIG_FILE=".goreleaser.beta.yml"
+            ;;
+          release-candidate)
+            FINAL_VERSION="$NEW_VERSION-rc.${BETA_SUFFIX#rc.}"
+            IS_PRERELEASE="true"
+            CONFIG_FILE=".goreleaser.beta.yml"
+            ;;
+          stable)
+            FINAL_VERSION="$NEW_VERSION"
+            IS_PRERELEASE="false"
+            CONFIG_FILE=".goreleaser.yml"
+            ;;
+          hotfix)
+            FINAL_VERSION="$NEW_VERSION-hotfix"
+            IS_PRERELEASE="false"
+            CONFIG_FILE=".goreleaser.yml"
+            ;;
+          *)
+            echo "Unknown release type: $RELEASE_TYPE"
+            exit 1
+            ;;
+        esac
+        
+        # Override prerelease setting if explicitly set
+        if [ "$CREATE_PRERELEASE" != "true" ]; then
+          IS_PRERELEASE="$CREATE_PRERELEASE"
+        fi
+        
+        FINAL_TAG="v$FINAL_VERSION"
+        
+        echo ""
+        echo "Release details:"
+        echo "  Final version: $FINAL_VERSION"
+        echo "  Final tag: $FINAL_TAG"
+        echo "  Is prerelease: $IS_PRERELEASE"
+        echo "  Config file: $CONFIG_FILE"
+        
+        # Set outputs
+        echo "version=v$FINAL_VERSION" >> $GITHUB_OUTPUT
+        echo "version_number=$FINAL_VERSION" >> $GITHUB_OUTPUT
+        echo "tag=v$FINAL_VERSION" >> $GITHUB_OUTPUT
+        echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+        echo "config_file=$CONFIG_FILE" >> $GITHUB_OUTPUT
+        echo "release_type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
+        echo "dry_run=$DRY_RUN" >> $GITHUB_OUTPUT
+
+    - name: Create release tag
+      if: ${{ steps.version.outputs.dry_run != 'true' }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        
+        echo "Creating and pushing tag: ${{ steps.version.outputs.tag }}"
+        git tag ${{ steps.version.outputs.tag }}
+        git push origin ${{ steps.version.outputs.tag }}
+        
+    - name: Dry run - Skip tag creation
+      if: ${{ steps.version.outputs.dry_run == 'true' }}
+      run: |
+        echo "🧪 DRY RUN: Would create tag ${{ steps.version.outputs.tag }}"
+        echo "Skipping actual tag creation and push"
+
+    - name: Run GoReleaser (Production)
+      if: ${{ steps.version.outputs.dry_run != 'true' }}
+      uses: goreleaser/goreleaser-action@v5
+      with:
+        distribution: goreleaser
+        version: latest
+        args: release --clean --config ${{ steps.version.outputs.config_file }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Run GoReleaser (Dry Run)
+      if: ${{ steps.version.outputs.dry_run == 'true' }}
+      uses: goreleaser/goreleaser-action@v5
+      with:
+        distribution: goreleaser
+        version: latest
+        args: build --clean --config ${{ steps.version.outputs.config_file }} --snapshot
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Release summary and instructions
+      run: |
+        RELEASE_TYPE="${{ steps.version.outputs.release_type }}"
+        VERSION="${{ steps.version.outputs.version }}"
+        IS_PRERELEASE="${{ steps.version.outputs.is_prerelease }}"
+        DRY_RUN="${{ steps.version.outputs.dry_run }}"
+        
+        if [ "$DRY_RUN" = "true" ]; then
+          echo "🧪 DRY RUN COMPLETED"
+          echo "=================================="
+          echo "✅ Build successful for version: $VERSION"
+          echo "📦 Binaries built but not published"
+          echo "🏷️  Tag would be created: $VERSION"
+          echo "⚠️  No actual release was created"
+          echo ""
+          echo "To create the actual release, run without dry_run option."
+          exit 0
+        fi
+        
+        case "$RELEASE_TYPE" in
+          beta)
+            echo "🧪 BETA RELEASE $VERSION CREATED SUCCESSFULLY!"
+            echo "=============================================="
+            echo ""
+            echo "📦 Installation:"
+            echo "gh extension install sup3r7-fabio/gh-pwsh-skills@$VERSION"
+            echo ""
+            echo "🔄 Upgrade existing installation:"
+            echo "gh extension upgrade gh-pwsh-skills"
+            echo ""
+            echo "⚠️  This is a BETA release - please test thoroughly!"
+            echo "🐛 Report issues at: https://github.com/sup3r7-fabio/gh-pwsh-skills/issues"
+            ;;
+          release-candidate)
+            echo "🚀 RELEASE CANDIDATE $VERSION CREATED SUCCESSFULLY!"
+            echo "================================================="
+            echo ""
+            echo "📦 Installation:"
+            echo "gh extension install sup3r7-fabio/gh-pwsh-skills@$VERSION"
+            echo ""
+            echo "⚠️  This is a RELEASE CANDIDATE - final testing before stable release"
+            echo "🐛 Report issues at: https://github.com/sup3r7-fabio/gh-pwsh-skills/issues"
+            ;;
+          stable)
+            echo "🎉 STABLE RELEASE $VERSION CREATED SUCCESSFULLY!"
+            echo "=============================================="
+            echo ""
+            echo "📦 Installation:"
+            echo "gh extension install sup3r7-fabio/gh-pwsh-skills"
+            echo ""
+            echo "🔄 Upgrade existing installation:"
+            echo "gh extension upgrade gh-pwsh-skills"
+            echo ""
+            echo "✅ This is a stable release - ready for production use!"
+            ;;
+          hotfix)
+            echo "🔥 HOTFIX RELEASE $VERSION CREATED SUCCESSFULLY!"
+            echo "=============================================="
+            echo ""
+            echo "📦 Installation:"
+            echo "gh extension install sup3r7-fabio/gh-pwsh-skills"
+            echo ""
+            echo "🔄 Upgrade existing installation (RECOMMENDED):"
+            echo "gh extension upgrade gh-pwsh-skills"
+            echo ""
+            echo "� This hotfix contains important bug fixes - please upgrade!"
+            ;;
+        esac
+        
+        echo ""
+        echo "🔗 Release page: https://github.com/sup3r7-fabio/gh-pwsh-skills/releases/tag/$VERSION"
+        echo "📋 Prerelease: $IS_PRERELEASE"
+
+  notify:
+    name: Notify Release Status
+    needs: beta-release
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Notification
+      run: |
+        if [ "${{ needs.beta-release.result }}" = "success" ]; then
+          echo "✅ Release pipeline completed successfully!"
+          echo ""
+          echo "🔗 Releases page: https://github.com/sup3r7-fabio/gh-pwsh-skills/releases"
+          echo "📊 Actions page: https://github.com/sup3r7-fabio/gh-pwsh-skills/actions"
+          echo ""
+          echo "Next steps:"
+          echo "  • Test the new release"
+          echo "  • Update documentation if needed"
+          echo "  • Announce the release to users"
+        elif [ "${{ needs.beta-release.result }}" = "skipped" ]; then
+          echo "⏭️  Release pipeline was skipped"
+          echo "This may be due to test failures or other conditions"
+        else
+          echo "❌ Release pipeline failed!"
+          echo ""
+          echo "🔍 Check the workflow logs for details:"
+          echo "https://github.com/sup3r7-fabio/gh-pwsh-skills/actions"
+          echo ""
+          echo "Common issues:"
+          echo "  • Test failures"
+          echo "  • Build errors"
+          echo "  • Permission issues"
+          echo "  • Invalid version format"
+        fi

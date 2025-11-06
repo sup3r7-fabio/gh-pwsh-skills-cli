@@ -1,0 +1,339 @@
+name: Flexible Semver Release
+
+on:
+  push:
+    tags:
+      # Flexible semver patterns - allows more variations
+      - 'v[0-9]+.[0-9]+.[0-9]+'                      # v1.0.0 (stable)
+      - 'v[0-9]+.[0-9]+.[0-9]+-alpha.[0-9]+'         # v1.0.0-alpha.1
+      - 'v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+'          # v1.0.0-beta.1
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'            # v1.0.0-rc.1
+      - 'v[0-9]+.[0-9]+.[0-9]+-dev.[0-9]+'           # v1.0.0-dev.123
+      - 'v[0-9]+.[0-9]+.[0-9]+-nightly.[0-9]+'       # v1.0.0-nightly.456
+      - 'v[0-9]+.[0-9]+.[0-9]+-hotfix.[0-9]+'        # v1.0.0-hotfix.1
+      - 'v[0-9]+.[0-9]+.[0-9]+-build.[0-9]+'         # v1.0.0-build.123
+
+env:
+  GO_VERSION: '1.25.3'
+
+jobs:
+  validate-flexible-semver:
+    name: Validate Flexible Semver
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      is_prerelease: ${{ steps.validate.outputs.is_prerelease }}
+      release_type: ${{ steps.validate.outputs.release_type }}
+      config_file: ${{ steps.validate.outputs.config_file }}
+      
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Validate flexible semver
+      id: validate
+      run: |
+        set -euo pipefail
+        
+        TAG_NAME=${GITHUB_REF#refs/tags/}
+        echo "Processing flexible semver tag: $TAG_NAME"
+        
+        # Enhanced semver validation with multiple prerelease types
+        if [[ $TAG_NAME =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          # Stable release
+          RELEASE_TYPE="stable"
+          IS_PRERELEASE="false"
+          CONFIG_FILE=".goreleaser.yml"
+          echo "📦 Stable Release: $TAG_NAME"
+          
+        elif [[ $TAG_NAME =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-(alpha|beta|rc|dev|nightly|hotfix|build)\.([0-9]+)$ ]]; then
+          # Pre-release with various types
+          PRERELEASE_TYPE="${BASH_REMATCH[4]}"
+          PRERELEASE_NUMBER="${BASH_REMATCH[5]}"
+          
+          case "$PRERELEASE_TYPE" in
+            alpha)
+              RELEASE_TYPE="alpha"
+              IS_PRERELEASE="true"
+              CONFIG_FILE=".goreleaser.beta.yml"
+              echo "🧪 Alpha Release: $TAG_NAME"
+              ;;
+            beta)
+              RELEASE_TYPE="beta"
+              IS_PRERELEASE="true" 
+              CONFIG_FILE=".goreleaser.beta.yml"
+              echo "🧪 Beta Release: $TAG_NAME"
+              ;;
+            rc)
+              RELEASE_TYPE="release-candidate"
+              IS_PRERELEASE="true"
+              CONFIG_FILE=".goreleaser.yml"
+              echo "🚀 Release Candidate: $TAG_NAME"
+              ;;
+            dev)
+              RELEASE_TYPE="development"
+              IS_PRERELEASE="true"
+              CONFIG_FILE=".goreleaser.beta.yml"
+              echo "⚡ Development Build: $TAG_NAME"
+              ;;
+            nightly)
+              RELEASE_TYPE="nightly"
+              IS_PRERELEASE="true"
+              CONFIG_FILE=".goreleaser.beta.yml"
+              echo "🌙 Nightly Build: $TAG_NAME"
+              ;;
+            hotfix)
+              RELEASE_TYPE="hotfix"
+              IS_PRERELEASE="false"  # Hotfixes are not prereleases
+              CONFIG_FILE=".goreleaser.yml"
+              echo "🔥 Hotfix Release: $TAG_NAME"
+              ;;
+            build)
+              RELEASE_TYPE="build"
+              IS_PRERELEASE="true"
+              CONFIG_FILE=".goreleaser.beta.yml"
+              echo "🔨 Build Release: $TAG_NAME"
+              ;;
+            *)
+              echo "❌ Unsupported prerelease type: $PRERELEASE_TYPE"
+              exit 1
+              ;;
+          esac
+          
+        else
+          echo "❌ Invalid semver format: $TAG_NAME"
+          echo ""
+          echo "Flexible semver supports these formats:"
+          echo "  Stable:           v1.2.3"
+          echo "  Alpha:            v1.2.3-alpha.N"
+          echo "  Beta:             v1.2.3-beta.N"
+          echo "  Release Candidate: v1.2.3-rc.N"
+          echo "  Development:      v1.2.3-dev.N"
+          echo "  Nightly:          v1.2.3-nightly.N"
+          echo "  Hotfix:           v1.2.3-hotfix.N"
+          echo "  Build:            v1.2.3-build.N"
+          echo "  (where N is a positive integer)"
+          exit 1
+        fi
+        
+        # Version component validation
+        MAJOR=${BASH_REMATCH[1]}
+        MINOR=${BASH_REMATCH[2]}
+        PATCH=${BASH_REMATCH[3]}
+        
+        # Validate version components are not too large
+        if (( MAJOR > 999 || MINOR > 999 || PATCH > 999 )); then
+          echo "❌ Version components too large (max 999 each): $MAJOR.$MINOR.$PATCH"
+          exit 1
+        fi
+        
+        # Check for duplicate tags (with error handling)
+        if git tag -l 2>/dev/null | grep -q "^$TAG_NAME$"; then
+          echo "ℹ️  Tag already exists, this is a re-run"
+        else
+          echo "ℹ️  New tag: $TAG_NAME"
+        fi
+        
+        echo "✅ Tag validation successful"
+        echo ""
+        echo "📋 Release Summary:"
+        echo "  Tag: $TAG_NAME"
+        echo "  Type: $RELEASE_TYPE"
+        echo "  Prerelease: $IS_PRERELEASE"
+        echo "  Config: $CONFIG_FILE"
+        
+        # Set outputs
+        echo "version=$TAG_NAME" >> $GITHUB_OUTPUT
+        echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+        echo "release_type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
+        echo "config_file=$CONFIG_FILE" >> $GITHUB_OUTPUT
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    needs: validate-flexible-semver
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+          
+    - name: Download dependencies
+      run: go mod download
+      
+    - name: Run tests
+      run: |
+        echo "🧪 Running test suite for ${{ needs.validate-flexible-semver.outputs.version }}"
+        go test -v ./...
+        
+    - name: Build verification
+      run: |
+        echo "🔨 Building for ${{ needs.validate-flexible-semver.outputs.release_type }} release"
+        go build -v ./...
+
+  release:
+    name: Create Flexible Release
+    needs: [validate-flexible-semver, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Pre-release checks
+      run: |
+        VERSION="${{ needs.validate-flexible-semver.outputs.version }}"
+        RELEASE_TYPE="${{ needs.validate-flexible-semver.outputs.release_type }}"
+        
+        echo "🚀 Preparing release $VERSION ($RELEASE_TYPE)"
+        
+        # Additional checks based on release type
+        case "$RELEASE_TYPE" in
+          stable)
+            echo "✅ Stable release - full validation"
+            ;;
+          hotfix)
+            echo "🔥 Hotfix release - expedited process"
+            ;;
+          alpha|beta|development|nightly|build)
+            echo "🧪 Pre-release - limited validation"
+            ;;
+          release-candidate)
+            echo "🚀 Release candidate - full validation"
+            ;;
+        esac
+
+    - name: Validate GoReleaser config
+      run: |
+        CONFIG_FILE="${{ needs.validate-flexible-semver.outputs.config_file }}"
+        echo "Validating GoReleaser config: $CONFIG_FILE"
+        
+        if [[ ! -f "$CONFIG_FILE" ]]; then
+          echo "❌ GoReleaser config not found: $CONFIG_FILE" 
+          echo "Available configs:"
+          ls -la .goreleaser* 2>/dev/null || echo "No .goreleaser files found"
+          exit 1
+        fi
+        
+        echo "✅ Config validated: $CONFIG_FILE"
+
+    - name: Run GoReleaser
+      uses: goreleaser/goreleaser-action@v5
+      with:
+        distribution: goreleaser
+        version: latest
+        args: release --clean --config ${{ needs.validate-flexible-semver.outputs.config_file }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Post-release actions
+      run: |
+        VERSION="${{ needs.validate-flexible-semver.outputs.version }}"
+        RELEASE_TYPE="${{ needs.validate-flexible-semver.outputs.release_type }}"
+        IS_PRERELEASE="${{ needs.validate-flexible-semver.outputs.is_prerelease }}"
+        
+        echo "🎉 RELEASE PUBLISHED: $VERSION"
+        echo "================================="
+        echo "📋 Type: $RELEASE_TYPE"
+        echo "🏷️  Prerelease: $IS_PRERELEASE"
+        echo ""
+        
+        # Type-specific messages
+        case "$RELEASE_TYPE" in
+          stable)
+            echo "✅ STABLE RELEASE - Production ready!"
+            echo "📦 Install: gh extension install sup3r7-fabio/gh-pwsh-skills"
+            echo "🔄 Upgrade: gh extension upgrade gh-pwsh-skills"
+            ;;
+          alpha)
+            echo "🧪 ALPHA RELEASE - Early testing version"
+            echo "📦 Install: gh extension install sup3r7-fabio/gh-pwsh-skills@$VERSION"
+            echo "⚠️  May contain bugs and breaking changes"
+            ;;
+          beta)
+            echo "🧪 BETA RELEASE - Feature-complete testing version"
+            echo "📦 Install: gh extension install sup3r7-fabio/gh-pwsh-skills@$VERSION"
+            echo "⚠️  Please test and provide feedback"
+            ;;
+          release-candidate)
+            echo "🚀 RELEASE CANDIDATE - Final testing before stable"
+            echo "📦 Install: gh extension install sup3r7-fabio/gh-pwsh-skills@$VERSION"
+            echo "🔍 Please test thoroughly"
+            ;;
+          development)
+            echo "⚡ DEVELOPMENT BUILD - Latest development changes"
+            echo "📦 Install: gh extension install sup3r7-fabio/gh-pwsh-skills@$VERSION"
+            echo "⚠️  Highly experimental - use with caution"
+            ;;
+          nightly)
+            echo "🌙 NIGHTLY BUILD - Automated daily build"
+            echo "📦 Install: gh extension install sup3r7-fabio/gh-pwsh-skills@$VERSION"
+            echo "⚠️  Automated build - may be unstable"
+            ;;
+          hotfix)
+            echo "🔥 HOTFIX RELEASE - Critical bug fixes"
+            echo "📦 Install: gh extension install sup3r7-fabio/gh-pwsh-skills"
+            echo "🔄 URGENT: Please upgrade immediately"
+            echo "🚨 Contains important security/stability fixes"
+            ;;
+          build)
+            echo "🔨 BUILD RELEASE - Specific build version"
+            echo "📦 Install: gh extension install sup3r7-fabio/gh-pwsh-skills@$VERSION"
+            echo "ℹ️  Custom build for specific requirements"
+            ;;
+        esac
+        
+        echo ""
+        echo "🔗 Release: https://github.com/sup3r7-fabio/gh-pwsh-skills/releases/tag/$VERSION"
+        echo "📊 Actions: https://github.com/sup3r7-fabio/gh-pwsh-skills/actions"
+        echo "🐛 Issues: https://github.com/sup3r7-fabio/gh-pwsh-skills/issues"
+
+  notify:
+    name: Release Notification
+    needs: [validate-flexible-semver, release]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Success notification
+      if: needs.release.result == 'success'
+      run: |
+        echo "✅ Flexible semver release completed successfully!"
+        echo "🎯 ${{ needs.validate-flexible-semver.outputs.version }} (${{ needs.validate-flexible-semver.outputs.release_type }})"
+        
+    - name: Failure notification
+      if: needs.release.result == 'failure'
+      run: |
+        echo "❌ Flexible semver release failed!"
+        echo "🏷️  Tag: ${{ needs.validate-flexible-semver.outputs.version }}"
+        echo "🔍 Check logs for details"

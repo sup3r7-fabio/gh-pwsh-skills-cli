@@ -1,0 +1,149 @@
+name: Strict Semver Release
+
+on:
+  push:
+    tags:
+      # Only exact semver patterns - no exceptions
+      - 'v[0-9]+.[0-9]+.[0-9]+'                    # v1.0.0 (stable only)
+      - 'v[0-9]+.[0-9]+.[0-9]+-alpha.[0-9]+'       # v1.0.0-alpha.1
+      - 'v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+'        # v1.0.0-beta.1  
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'          # v1.0.0-rc.1
+
+env:
+  GO_VERSION: '1.25.3'
+
+jobs:
+  validate-strict-semver:
+    name: Validate Strict Semver
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      is_prerelease: ${{ steps.validate.outputs.is_prerelease }}
+      release_type: ${{ steps.validate.outputs.release_type }}
+      
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+      
+    - name: Validate strict semver compliance
+      id: validate
+      run: |
+        set -euo pipefail
+        
+        TAG_NAME=${GITHUB_REF#refs/tags/}
+        echo "Validating strict semver tag: $TAG_NAME"
+        
+        # Strict semver validation - only allow specific patterns
+        if [[ $TAG_NAME =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          # Stable release: v1.2.3
+          RELEASE_TYPE="stable"
+          IS_PRERELEASE="false"
+          echo "✅ Valid stable release: $TAG_NAME"
+          
+        elif [[ $TAG_NAME =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-(alpha|beta|rc)\.([0-9]+)$ ]]; then
+          # Pre-release: v1.2.3-alpha.1, v1.2.3-beta.1, v1.2.3-rc.1
+          PRERELEASE_TYPE="${BASH_REMATCH[4]}"
+          RELEASE_TYPE="$PRERELEASE_TYPE"
+          IS_PRERELEASE="true"
+          echo "✅ Valid pre-release ($PRERELEASE_TYPE): $TAG_NAME"
+          
+        else
+          echo "❌ Invalid semver format: $TAG_NAME"
+          echo ""
+          echo "Strict semver requires one of these formats:"
+          echo "  Stable:           v1.2.3"
+          echo "  Alpha:            v1.2.3-alpha.1"
+          echo "  Beta:             v1.2.3-beta.1"  
+          echo "  Release Candidate: v1.2.3-rc.1"
+          echo ""
+          echo "Note: Development and nightly builds are not allowed in strict mode"
+          exit 1
+        fi
+        
+        # Additional validation: ensure version progression
+        MAJOR=${BASH_REMATCH[1]}
+        MINOR=${BASH_REMATCH[2]}  
+        PATCH=${BASH_REMATCH[3]}
+        
+        # Get latest stable tag for comparison (with error handling)
+        LATEST_STABLE=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname 2>/dev/null | grep -v '-' | head -n1 || echo "v0.0.0")
+        echo "Latest stable tag found: $LATEST_STABLE"
+        
+        if [[ "$IS_PRERELEASE" == "false" ]]; then
+          # For stable releases, ensure it's newer than the latest stable
+          if [[ -n "$LATEST_STABLE" ]] && [[ "$LATEST_STABLE" != "v0.0.0" ]]; then
+            if ! git tag --sort=-version:refname | grep -q "^$TAG_NAME$"; then
+              echo "⚠️  Version progression check: $TAG_NAME vs $LATEST_STABLE"
+            fi
+          fi
+        fi
+        
+        echo "version=$TAG_NAME" >> $GITHUB_OUTPUT
+        echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+        echo "release_type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
+
+  release:
+    name: Create Strict Semver Release
+    needs: validate-strict-semver
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Test and Build
+      run: |
+        go mod download
+        go test -v ./...
+        go build -v ./...
+        
+    - name: Determine GoReleaser config
+      id: config
+      run: |
+        if [[ "${{ needs.validate-strict-semver.outputs.is_prerelease }}" == "true" ]]; then
+          echo "config_file=.goreleaser.beta.yml" >> $GITHUB_OUTPUT
+        else
+          echo "config_file=.goreleaser.yml" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Validate GoReleaser config  
+      run: |
+        CONFIG_FILE="${{ steps.config.outputs.config_file }}"
+        echo "Validating GoReleaser config: $CONFIG_FILE"
+        
+        if [[ ! -f "$CONFIG_FILE" ]]; then
+          echo "❌ GoReleaser config not found: $CONFIG_FILE"
+          ls -la .goreleaser* 2>/dev/null || echo "No .goreleaser files found"
+          exit 1
+        fi
+        
+        echo "✅ Config validated: $CONFIG_FILE"
+
+    - name: Run GoReleaser
+      uses: goreleaser/goreleaser-action@v5
+      with:
+        distribution: goreleaser
+        version: latest
+        args: release --clean --config ${{ steps.config.outputs.config_file }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Release notification
+      run: |
+        VERSION="${{ needs.validate-strict-semver.outputs.version }}"
+        RELEASE_TYPE="${{ needs.validate-strict-semver.outputs.release_type }}"
+        
+        echo "🎉 Strict Semver Release Created: $VERSION"
+        echo "📋 Type: $RELEASE_TYPE"
+        echo "🔗 https://github.com/sup3r7-fabio/gh-pwsh-skills/releases/tag/$VERSION"
