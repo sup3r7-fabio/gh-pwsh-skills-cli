@@ -1,11 +1,11 @@
 package cmd
 
 import (
-"fmt"
-"math/rand"
-"time"
+	"fmt"
+	"math/rand"
+	"time"
 
-"github.com/spf13/cobra"
+	"github.com/spf13/cobra"
 )
 
 var hintCmd = &cobra.Command{
@@ -84,52 +84,54 @@ Reference:   "https://docs.microsoft.com/powershell/scripting/lang-spec/chapter-
 }
 
 func showHint() {
-fmt.Println("💡 PowerShell GitHub Skills - Contextual Hint")
-fmt.Println("=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=" + "=")
+	fmt.Println("💡 PowerShell GitHub Skills - Contextual Hint")
+	fmt.Println("=============================================")
 
-// Detect current course context
-courseType := detectCurrentCourse()
-if courseType == "" {
-fmt.Println("❌ Could not detect current course. Please run from a PowerShell Skills course directory.")
-return
-}
+	// Detect current course context
+	courseType := detectCurrentCourse()
+	if courseType == "" {
+		fmt.Println("❌ Could not detect current course. Please run from a PowerShell Skills course directory.")
+		return
+	}
 
-hints, exists := powerShellHints[courseType]
-if !exists {
-fmt.Printf("❌ No hints available for course type: %s\n", courseType)
-return
-}
+	hints, exists := powerShellHints[courseType]
+	if !exists {
+		fmt.Printf("❌ No hints available for course type: %s\n", courseType)
+		return
+	}
 
 	// Select a random hint from the appropriate course
 	// Use modern random number generation (Go 1.20+)
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	hint := hints[r.Intn(len(hints))]fmt.Printf("🎯 Topic: %s\n\n", hint.Title)
-fmt.Printf("📝 Explanation:\n%s\n\n", hint.Description)
-fmt.Printf("💻 Example:\n%s\n\n", hint.Example)
-fmt.Printf("📚 Learn More: %s\n\n", hint.Reference)
+	hint := hints[r.Intn(len(hints))]
+	
+	fmt.Printf("🎯 Topic: %s\n\n", hint.Title)
+	fmt.Printf("📝 Explanation:\n%s\n\n", hint.Description)
+	fmt.Printf("💻 Example:\n%s\n\n", hint.Example)
+	fmt.Printf("📚 Learn More: %s\n\n", hint.Reference)
 
-// Additional context-aware tips
-fmt.Println("🔧 Pro Tips:")
-switch courseType {
-case "fundamentals":
-fmt.Println("• Use Get-Help <command> to learn about any PowerShell command")
-fmt.Println("• PowerShell is case-insensitive for commands and variables")
-fmt.Println("• Use tab completion to discover available commands and parameters")
-case "pipelines":
-fmt.Println("• Remember: PowerShell passes objects, not text through the pipeline")
-fmt.Println("• Use Get-Member to explore object properties and methods")
-fmt.Println("• ForEach-Object processes each pipeline object individually")
-case "functions":
-fmt.Println("• Always include [CmdletBinding()] for advanced function features")
-fmt.Println("• Use Write-Verbose for debugging instead of Write-Host")
-fmt.Println("• Return objects, not formatted text from functions")
-case "automation":
-fmt.Println("• Use PowerShell classes for complex data structures")
-fmt.Println("• Implement proper error handling with try/catch/finally")
-fmt.Println("• Consider security implications when automating sensitive operations")
-}
+	// Additional context-aware tips
+	fmt.Println("🔧 Pro Tips:")
+	switch courseType {
+	case "fundamentals":
+		fmt.Println("• Use Get-Help <command> to learn about any PowerShell command")
+		fmt.Println("• PowerShell is case-insensitive for commands and variables")
+		fmt.Println("• Use tab completion to discover available commands and parameters")
+	case "pipelines":
+		fmt.Println("• Remember: PowerShell passes objects, not text through the pipeline")
+		fmt.Println("• Use Get-Member to explore object properties and methods")
+		fmt.Println("• ForEach-Object processes each pipeline object individually")
+	case "functions":
+		fmt.Println("• Always include [CmdletBinding()] for advanced function features")
+		fmt.Println("• Use Write-Verbose for debugging instead of Write-Host")
+		fmt.Println("• Return objects, not formatted text from functions")
+	case "automation":
+		fmt.Println("• Use PowerShell classes for complex data structures")
+		fmt.Println("• Implement proper error handling with try/catch/finally")
+		fmt.Println("• Consider security implications when automating sensitive operations")
+	}
 
-fmt.Println("\n🚀 Ready to continue? Use ''gh pwsh-skills validate'' to test your solution!")
+	fmt.Println("\n🚀 Ready to continue? Use 'gh pwsh-skills validate' to test your solution!")
 }
 
 func detectCurrentCourse() string {
